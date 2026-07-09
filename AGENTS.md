@@ -4,7 +4,12 @@ This file tells AI how to use AI Flow.
 
 ## Role Detection
 
-Detect the user's role intent from any of these patterns (case-insensitive):
+Detect the user's role intent from any of these patterns (case-insensitive).
+
+**Precedence: ticket-ID shortcut wins over default Planner.**
+
+**Ticket-ID shortcut (highest priority):**
+If a ticket ID (e.g., `AF-0001`) is present but no role is specified → default to Builder.
 
 **Planner triggers:**
 - "You are the Planner"
@@ -16,7 +21,7 @@ Detect the user's role intent from any of these patterns (case-insensitive):
 - "Planner mode"
 - "I need you to be the Planner"
 - "You're the Planner"
-- No role specified → default to Planner
+- No role specified + no ticket ID → default to Planner
 
 **Builder triggers:**
 - "You are the Builder"
@@ -29,8 +34,6 @@ Detect the user's role intent from any of these patterns (case-insensitive):
 - "I need you to be the Builder"
 - "You're the Builder"
 
-If the user gives a ticket ID (e.g., `AF-0001`) without specifying a role, default to Builder.
-
 ## Repo Path Detection
 
 The user may specify the AI Flow repo path in any of these ways:
@@ -39,15 +42,24 @@ The user may specify the AI Flow repo path in any of these ways:
 - `Use the repo at C:\AI Flow`
 - `The repo is at C:\AI Flow`
 - `Working directory: C:\AI Flow`
-- `Use this repo` → use the current working directory
+- `Use this repo` → use the current working directory only if it contains `AGENTS.md` and `core/scripts/aiflow.py`. If not, ask the user.
 - Just `C:\AI Flow` mentioned anywhere in the prompt
+- Indonesian: `Gunakan C:\AI Flow`, `Repo di C:\AI Flow`
 
 If no path is given and the context doesn't clarify, ask the user.
 
 ## Task Routing
 
-If the user gives a task without a ticket, classify it:
+If the user gives a task without a ticket, classify it. See `core/ROUTER.md` for full detection rules and precedence.
 
+**Precedence summary:**
+1. Bug/error keywords beat research keywords → coding
+2. "issue" + bug/error/save/code context → coding. "issue" + write/report context → docs. "issue" alone → coding.
+3. Explicit user-specified type beats inference
+4. Default complexity: medium
+5. Default role: Planner (unless ticket ID present)
+
+Classification output:
 ```text
 Task type: docs | ppt | spreadsheet | coding | research | mixed
 Complexity: simple | medium | complex
@@ -64,6 +76,12 @@ When acting as Planner:
 
 1. Read `core/ROUTER.md` to classify the task.
 2. Read the relevant skill file in `core/skills/`.
+   - `coding` → `core/skills/coding.md`
+   - `docs` → `core/skills/docs.md`
+   - `ppt` → `core/skills/ppt.md`
+   - `spreadsheet` → `core/skills/spreadsheets.md`
+   - `research` → `core/skills/research.md`
+   - `mixed` → read each relevant skill
 3. If the user mentions an external project path, use it as `Target workspace`.
 4. If the user mentions a suspicious file or class, add it to `Allowed areas`.
 5. Do not edit code unless the user explicitly asks.
@@ -97,12 +115,15 @@ When the user gives a path like `C:\Project\NMU`:
 python core/scripts/aiflow.py bootstrap
 python core/scripts/aiflow.py doctor
 python core/scripts/aiflow.py plan "task description" --type coding --complexity medium
+python core/scripts/aiflow.py plan-prompt "full user prompt here"
+python core/scripts/aiflow.py new-prompt "full user prompt here"
 ```
 
 ## Source of Truth
 
 Always read before acting:
 - `core/WORKFLOW.md` — workflow rules
+- `core/ROUTER.md` — task classification and precedence
 - `core/roles/PLANNER.md` or `core/roles/BUILDER.md` — role rules
 - `core/skills/*.md` — task-type rules
 - `core/templates/*.md` — output formats

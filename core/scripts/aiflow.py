@@ -91,6 +91,256 @@ def workspace_for_task(task_type: str) -> str:
     return TASK_TO_WORKSPACE.get(task_type, "research")
 
 
+def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str]:
+    """Parse a raw user prompt into structured routing fields.
+
+    Returns dict with keys: role, task_type, complexity, target_workspace,
+    suspected_area, ticket_id, title.
+    Empty string means not detected.
+    """
+    text = prompt.strip()
+    lower = text.lower()
+    result: dict[str, str] = {
+        "role": "",
+        "task_type": "",
+        "complexity": "",
+        "target_workspace": "",
+        "suspected_area": "",
+        "ticket_id": "",
+        "title": "",
+    }
+
+    # --- Ticket ID ---
+    ticket_match = re.search(r"\bAF-(\d+)\b", text, re.IGNORECASE)
+    if ticket_match:
+        result["ticket_id"] = f"AF-{ticket_match.group(1)}"
+
+    # --- Role detection (case-insensitive) ---
+    planner_patterns = [
+        r"\byou\s+are\s+the\s+planner\b",
+        r"\bact\s+as\s+planner\b",
+        r"\bbe\s+the\s+planner\b",
+        r"\bas\s+the\s+planner\b",
+        r"\bplanner\s*[,!]",
+        r"\bswitch\s+to\s+planner\b",
+        r"\bplanner\s+mode\b",
+        r"\bi\s+need\s+you\s+to\s+be\s+the\s+planner\b",
+        r"\byou'?re\s+the\s+planner\b",
+    ]
+    builder_patterns = [
+        r"\byou\s+are\s+the\s+builder\b",
+        r"\bact\s+as\s+builder\b",
+        r"\bbe\s+the\s+builder\b",
+        r"\bas\s+the\s+builder\b",
+        r"\bbuilder\s*[,!]",
+        r"\bswitch\s+to\s+builder\b",
+        r"\bbuilder\s+mode\b",
+        r"\bi\s+need\s+you\s+to\s+be\s+the\s+builder\b",
+        r"\byou'?re\s+the\s+builder\b",
+    ]
+
+    is_planner = any(re.search(p, lower) for p in planner_patterns)
+    is_builder = any(re.search(p, lower) for p in builder_patterns)
+
+    if is_planner and not is_builder:
+        result["role"] = "planner"
+    elif is_builder and not is_planner:
+        result["role"] = "builder"
+    elif result["ticket_id"]:
+        result["role"] = "builder"  # ticket-ID shortcut
+    # else: no role detected, leave empty (caller defaults to planner)
+
+    # --- External workspace detection ---
+    detected_path = ""
+
+    # Strategy 1: Find path markers and extract path after them
+    # Handles paths with spaces: "Use C:\AI Flow", "Workspace: C:\Project\NMU"
+    marker_re = re.compile(
+        r"(?:use|gunakan|workspace\s*:\s*|project\s+(?:is\s+)?at\s+|"
+        r"the\s+code\s+is\s+in\s+|working\s+on\s+|repo\s+(?:at|di)\s+)",
+        re.IGNORECASE,
+    )
+    for m in marker_re.finditer(text):
+        after = text[m.end():]
+        # Try Windows path: drive letter + colon + backslash + path chars
+        wp = re.match(r"([A-Z]:\\(?:[\w][\w \\-]*[\w]|[\w]))", after, re.IGNORECASE)
+        if wp:
+            candidate = wp.group(1).strip()
+            # Verify it's not followed by more path chars (cross-sentence bleed)
+            rest = after[wp.end():]
+            if not rest or rest[0] in ".,;:!?\n" or rest.startswith(" ") or rest.lower().startswith(("especially", "terutama", "look", "specifically")):
+                # Skip if this is the AI Flow repo itself
+                if ai_flow_root:
+                    try:
+                        if Path(candidate).resolve() == ai_flow_root.resolve():
+                            continue
+                    except Exception:
+                        pass
+                detected_path = candidate
+                break
+        # Try Unix path
+        up = re.match(r"(/[\w][\w/ _-]*[\w/])", after)
+        if up:
+            candidate = up.group(1).strip()
+            rest = after[up.end():]
+            if not rest or rest[0] in ".,;:!?\n" or rest.startswith(" "):
+                detected_path = candidate
+                break
+        # Try tilde path
+        tp = re.match(r"(~/[\w][\w/ _-]*[\w/])", after)
+        if tp:
+            candidate = tp.group(1).strip()
+            rest = after[tp.end():]
+            if not rest or rest[0] in ".,;:!?\n" or rest.startswith(" "):
+                detected_path = candidate
+                break
+
+    # Strategy 2: Bare path without spaces (no marker needed)
+    if not detected_path:
+        win_path = re.search(r"\b([A-Z]:\\[^\s,;\"']+)", text)
+        unix_path = re.search(r"\b(/(?:home|var|opt|usr|mnt|tmp)/[^\s,;\"']+)", text)
+        tilde_path = re.search(r"\b(~/[^\s,;\"']+)", text)
+        candidate = ""
+        if win_path:
+            candidate = win_path.group(1).rstrip(".")
+        elif unix_path:
+            candidate = unix_path.group(1).rstrip(".")
+        elif tilde_path:
+            candidate = tilde_path.group(1).rstrip(".")
+        if candidate:
+            # Skip if this is the AI Flow repo itself
+            if ai_flow_root:
+                try:
+                    if Path(candidate).resolve() != ai_flow_root.resolve():
+                        detected_path = candidate
+                except Exception:
+                    detected_path = candidate
+            else:
+                detected_path = candidate
+
+    if detected_path:
+        result["target_workspace"] = detected_path
+
+    # Fallback: non-path workspace references (e.g., "Workspace: inventory module")
+    if not result["target_workspace"]:
+        for pattern in [
+            r"workspace\s*:\s*([^\n.]+?)(?:\s*[.,;]|\s*$|\s+\bespecially\b|\s+\bterutama\b)",
+            r"project\s+(?:is\s+)?at\s+([^\n.]+?)(?:\s*[.,;]|\s*$|\s+\bespecially\b|\s+\bterutama\b)",
+        ]:
+            m = re.search(pattern, text, re.IGNORECASE)
+            if m:
+                candidate = m.group(1).strip().rstrip(".")
+                if len(candidate) > 3 and not candidate.lower().startswith(("c:\\", "d:\\", "/home", "/var", "~/")):
+                    result["target_workspace"] = candidate
+                    break
+
+    # --- Suspected area detection ---
+    # CamelCase class names
+    camel = re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", text)
+    if camel:
+        result["suspected_area"] = camel[0]
+
+    # File names with extensions (e.g., PreAccounting.java)
+    if not result["suspected_area"]:
+        file_match = re.search(r"\b(\w+\.(?:java|py|js|ts|xml|json|sql|cs|cpp|h|go|rb|php|swift|kt))\b", text, re.IGNORECASE)
+        if file_match:
+            result["suspected_area"] = file_match.group(1)
+
+    # "especially the X" / "terutama X" / "specifically X"
+    if not result["suspected_area"]:
+        for pattern in [
+            r"especially\s+(?:the\s+)?([A-Z][\w]*(?:\s+[A-Z][\w]*)*)",
+            r"terutama\s+(?:class\s+)?([A-Z][\w]*(?:\s+[A-Z][\w]*)*)",
+            r"specifically\s+(?:the\s+)?([A-Z][\w]*(?:\s+[A-Z][\w]*)*)",
+            r"suspected\s*:\s*([^\n]+)",
+        ]:
+            m = re.search(pattern, text, re.IGNORECASE)
+            if m:
+                result["suspected_area"] = m.group(1).strip().rstrip(".")
+                break
+
+    # --- Task type detection ---
+    coding_bug_kw = [
+        "bug", "error", "fix", "crash", "exception", "stacktrace",
+        "not working", "broken", "broke", "problem", "fails", "failed",
+        "gagal", "tidak bisa", "tidak jalan", "bermasalah",
+        "tampil error", "muncul error", "keluar error", "ada error",
+    ]
+    coding_feature_kw = ["implement", "add feature", "create function", "build", "refactor", "develop"]
+    docs_kw = ["summarize", "write", "document", "sop", "guide", "report", "documentation", "buat dokumen", "tulis"]
+    ppt_kw = ["slides", "deck", "presentation", "pitch", "ppt", "buat presentasi"]
+    spreadsheet_kw = ["excel", "csv", "spreadsheet", "reconcile", "filter data", "buat laporan"]
+    research_kw = ["analyze", "compare", "research", "evaluate", "analisis", "bandingkan"]
+
+    has_bug = any(kw in lower for kw in coding_bug_kw)
+    has_feature = any(kw in lower for kw in coding_feature_kw)
+    has_docs = any(kw in lower for kw in docs_kw)
+    has_ppt = any(kw in lower for kw in ppt_kw)
+    has_spreadsheet = any(kw in lower for kw in spreadsheet_kw)
+    has_research = any(kw in lower for kw in research_kw)
+
+    # Contextual "issue": check for code/save/workspace context
+    has_issue = "issue" in lower
+    code_context_kw = [
+        "save", "load", "code", "class", "file", "java", "python",
+        "script", "module", "function", ".java", ".py", ".js", ".ts", ".cs",
+        "preposting", "inventory", "transaksi",
+    ]
+    has_code_context = any(kw in lower for kw in code_context_kw)
+    has_write_context = any(kw in lower for kw in ["write", "report", "document", "summarize", "tulis", "buat"])
+
+    # Precedence: bug beats research, issue contextual
+    if has_bug:
+        result["task_type"] = "coding"
+    elif has_issue and has_write_context:
+        result["task_type"] = "docs"
+    elif has_issue and has_code_context:
+        result["task_type"] = "coding"
+    elif has_issue:
+        result["task_type"] = "coding"  # safe default
+    elif has_feature:
+        result["task_type"] = "coding"
+    elif has_ppt:
+        result["task_type"] = "ppt"
+    elif has_spreadsheet:
+        result["task_type"] = "spreadsheet"
+    elif has_docs:
+        result["task_type"] = "docs"
+    elif has_research:
+        result["task_type"] = "research"
+
+    # --- Complexity detection ---
+    simple_kw = ["simple", "mudah", "small", "quick", "trivial", "one file", "single file"]
+    complex_kw = ["complex", "rumit", "large", "multi-step", "cross-system", "uncertain", "many files"]
+
+    if any(kw in lower for kw in simple_kw):
+        result["complexity"] = "simple"
+    elif any(kw in lower for kw in complex_kw):
+        result["complexity"] = "complex"
+    else:
+        result["complexity"] = "medium"
+
+    # --- Title extraction (first sentence or first 80 chars) ---
+    first_line = text.split("\n")[0].strip()
+    # Remove role prefix if present
+    for prefix in ["you are the planner", "you are the builder", "act as planner",
+                    "act as builder", "be the planner", "be the builder",
+                    "as the planner", "as the builder", "planner,", "builder,"]:
+        if first_line.lower().startswith(prefix):
+            first_line = first_line[len(prefix):].lstrip(" ,.!:").strip()
+            break
+    # Remove "use <path>" prefix
+    first_line = re.sub(r"^[Uu]se\s+[^.]*\.?\s*", "", first_line).strip()
+    first_line = re.sub(r"^[Gg]unakan\s+[^.]*\.?\s*", "", first_line).strip()
+    # Stop at workspace/project markers
+    first_line = re.split(r"\s+(?:Workspace|Project|Repo)\s*:", first_line, maxsplit=1, flags=re.IGNORECASE)[0]
+    # Stop at "especially" / "terutama"
+    first_line = re.split(r"\s+(?:especially|terutama)\s+", first_line, maxsplit=1, flags=re.IGNORECASE)[0]
+    result["title"] = first_line[:120].strip().rstrip(".,;") if first_line else text[:120]
+
+    return result
+
+
 def safe_slug(text: str, max_length: int = 60) -> str:
     text = text.lower().strip()
     allowed = []
@@ -270,7 +520,15 @@ def unique_path(path: Path) -> Path:
         counter += 1
 
 
-def write_ticket(root: Path, title: str, task_type: str, complexity: str, lane: str) -> Path:
+def write_ticket(
+    root: Path,
+    title: str,
+    task_type: str,
+    complexity: str,
+    lane: str,
+    target_workspace: str = "",
+    suspected_area: str = "",
+) -> Path:
     tickets_dir = root / "core" / "tickets"
     workspaces_dir = root / "workspaces"
 
@@ -296,6 +554,13 @@ def write_ticket(root: Path, title: str, task_type: str, complexity: str, lane: 
         f"Complexity: {complexity}",
         "Owner: Builder",
         f"Planned workspace: {planned_workspace}",
+        f"Target workspace: {target_workspace or planned_workspace}",
+    ]
+
+    if suspected_area:
+        lines.append(f"Suspected area: {suspected_area}")
+
+    lines += [
         f"Lane: {lane}",
         f"Skill: {skill_path}",
         "Created from: core/scripts/aiflow.py",
@@ -311,8 +576,21 @@ def write_ticket(root: Path, title: str, task_type: str, complexity: str, lane: 
         "",
         "## Allowed areas",
         "",
-        "- assigned workspace only",
-        "- source files explicitly referenced in this ticket",
+    ]
+
+    if suspected_area:
+        lines += [
+            f"- {suspected_area}",
+            "- directly related files in the same module",
+            "- assigned workspace",
+        ]
+    else:
+        lines += [
+            "- assigned workspace only",
+            "- source files explicitly referenced in this ticket",
+        ]
+
+    lines += [
         "",
         "## Do not touch",
         "",
@@ -324,6 +602,16 @@ def write_ticket(root: Path, title: str, task_type: str, complexity: str, lane: 
         "- stay inside ticket scope",
         "- follow relevant skill file",
         "- record verification performed",
+    ]
+
+    if task_type == "coding" and suspected_area:
+        lines += [
+            "- reproduce the error first",
+            "- identify root cause before proposing fix",
+            "- document findings in the ticket",
+        ]
+
+    lines += [
         "",
         "## Non-goals",
         "",
@@ -335,6 +623,16 @@ def write_ticket(root: Path, title: str, task_type: str, complexity: str, lane: 
         "- deliverable matches the goal",
         "- required checks or verification completed",
         "- builder report completed",
+    ]
+
+    if task_type == "coding" and suspected_area:
+        lines += [
+            "- root cause identified",
+            "- fix proposed or applied",
+            "- no unrelated changes",
+        ]
+
+    lines += [
         "",
         "## Verification",
         "",
@@ -754,12 +1052,15 @@ def usage() -> str:
       demo
       plan "title" --type <type> --complexity <complexity>
       new "title" --type <type> --complexity <complexity>
+      plan-prompt "full user prompt"
+      new-prompt "full user prompt"
       list [--status <status>]
       move <ticket-id> <status>
       report <ticket-id>
       review <ticket-id>
       workspace <ticket-id> [--task-type <type>]
       route <task-type>
+      parse "full user prompt"
 
     Options:
       --root <path>     override detected AI Flow root
@@ -844,6 +1145,48 @@ def main(argv: list[str] | None = None) -> int:
             lane = "project" if command == "plan" else "fast"
             path = write_ticket(root, title, task_type, complexity, lane)
             print(f"Created ticket: {path}")
+            return 0
+
+        if command in {"plan-prompt", "new-prompt"}:
+            positional = args.get("positional", [])
+            if len(positional) < 2:
+                raise AiFlowError("Prompt text is required.")
+            raw_prompt = positional[1]
+            parsed = parse_prompt(raw_prompt, ai_flow_root=root)
+            task_type = canonical_task_type(parsed["task_type"] or "research")
+            complexity = parsed["complexity"] or "medium"
+            lane = "project" if command == "plan-prompt" else "fast"
+            title = parsed["title"] or raw_prompt[:80]
+            path = write_ticket(
+                root,
+                title=title,
+                task_type=task_type,
+                complexity=complexity,
+                lane=lane,
+                target_workspace=parsed["target_workspace"],
+                suspected_area=parsed["suspected_area"],
+            )
+            print(f"Created ticket: {path}")
+            print(f"  Role hint: {parsed['role'] or 'planner (default)'}")
+            print(f"  Task type: {task_type}")
+            print(f"  Complexity: {complexity}")
+            print(f"  Lane: {lane}")
+            if parsed["target_workspace"]:
+                print(f"  Target workspace: {parsed['target_workspace']}")
+            if parsed["suspected_area"]:
+                print(f"  Suspected area: {parsed['suspected_area']}")
+            if parsed["ticket_id"]:
+                print(f"  Ticket ID found: {parsed['ticket_id']}")
+            return 0
+
+        if command == "parse":
+            positional = args.get("positional", [])
+            if len(positional) < 2:
+                raise AiFlowError("Prompt text is required.")
+            raw_prompt = positional[1]
+            parsed = parse_prompt(raw_prompt, ai_flow_root=root)
+            for key, value in parsed.items():
+                print(f"{key}: {value or '(not detected)'}")
             return 0
 
         if command == "list":

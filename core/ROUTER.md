@@ -4,6 +4,19 @@ This file classifies user requests into AI Flow workflow actions.
 
 ## Detection Rules
 
+### Precedence
+
+When multiple rules compete, apply in this order:
+
+1. **Role shortcut**: Ticket ID present + no role → Builder (overrides default Planner)
+2. **Bug beats research**: If both error/bug/fix/fail/problem keywords AND investigate/analyze keywords are present → coding, not research
+3. **Contextual issue**: "issue" alone → check context:
+   - paired with error/bug/fix/fail/crash/broken/problem/save/load/code/class/file/workspace → coding
+   - paired with write/document/report/summarize → docs
+   - no context clue → coding (safe default for this workflow)
+4. **Explicit beats implicit**: User-specified task type, complexity, or workspace overrides inference
+5. **Default role**: No role + no ticket ID → Planner
+
 ### Role Detection
 
 Case-insensitive. Match any of these patterns:
@@ -18,7 +31,7 @@ Case-insensitive. Match any of these patterns:
 - "planner mode"
 - "i need you to be the planner"
 - "you're the planner"
-- no role specified → Planner (default)
+- no role specified + no ticket ID → Planner (default)
 
 **Builder triggers:**
 - "you are the builder"
@@ -31,21 +44,39 @@ Case-insensitive. Match any of these patterns:
 - "i need you to be the builder"
 - "you're the builder"
 
-**Shortcut:**
+**Shortcut (highest role priority):**
 - If a ticket ID (e.g., `AF-0001`) is present but no role is specified → Builder
 
 ### Task Type Detection
 
-Case-insensitive. Match keywords anywhere in the prompt:
+Case-insensitive. Match keywords anywhere in the prompt.
 
-| Keywords | Task type |
-|---|---|
-| bug, error, fix, crash, exception, stacktrace, not working, broken, broke, problem, issue, trouble, fails, failed, gagal, tidak bisa, tidak jalan, bermasalah, tampil error, muncul error, keluar error, ada error | coding |
-| summarize, write, document, SOP, guide, report, documentation, buat dokumen, tulis | docs |
-| slides, deck, presentation, pitch, ppt, buat presentasi | ppt |
-| Excel, CSV, data, spreadsheet, reconcile, filter data, buat laporan | spreadsheet |
-| analyze, compare, research, investigate, evaluate, analisis, bandingkan | research |
-| multiple types combined | mixed |
+**Coding (bug/error — takes priority over research):**
+bug, error, fix, crash, exception, stacktrace, not working, broken, broke, problem, fails, failed, gagal, tidak bisa, tidak jalan, bermasalah, tampil error, muncul error, keluar error, ada error
+
+**Coding (contextual issue):**
+- "issue" + any of: error, bug, fix, fail, crash, broken, problem, save, load, code, class, file, workspace, java, python, script, module, function
+- "issue" alone → coding (safe default)
+
+**Coding (feature):**
+implement, add feature, create function, build, refactor, develop
+
+**Docs:**
+summarize, write, document, SOP, guide, report, documentation, buat dokumen, tulis, known issues report, issue list
+
+**PPT:**
+slides, deck, presentation, pitch, ppt, buat presentasi
+
+**Spreadsheet:**
+Excel, CSV, data, spreadsheet, reconcile, filter data, buat laporan
+
+**Research (only when no bug/error keywords present):**
+analyze, compare, research, evaluate, analisis, bandingkan
+
+Note: "investigate" alone → research. "investigate" + any bug/error keyword → coding.
+
+**Mixed:**
+multiple types combined
 
 **Fallback:**
 - If no keywords match but the user describes a concrete task → infer from context
@@ -72,11 +103,14 @@ And the path is NOT the AI Flow repo itself → treat as target project workspac
 
 Also detect these phrasings:
 - "Workspace: <path>"
+- "Workspace: <path>, especially the <ClassName>"
 - "project is at <path>"
 - "the code is in <path>"
 - "working on <path>"
 - "especially the <ClassName> class in <path>"
 - "<path>, especially the <ClassName>"
+- "gunakan <path>" (Indonesian: "use")
+- "repo di <path>" (Indonesian: "repo at")
 
 Record in ticket as:
 ```text
@@ -120,22 +154,59 @@ Status: ready
 Task type: coding
 Complexity: medium
 Owner: Builder
-Target workspace: <external path>
+Planned workspace: workspaces/code/AF-XXXX
+Target workspace: <external path or same as planned workspace>
 Suspected area: <class or file>
-Allowed areas:
+Lane: project
+Skill: core/skills/coding.md
+Created from: core/scripts/aiflow.py
+Created at: <timezone-aware ISO 8601>
+
+## Goal
+
+<one-sentence goal>
+
+## Context
+
+<what the user reported or requested>
+
+## Allowed areas
 - <suspected file paths>
-- directly related files
-Do not touch:
+- directly related files in the same module
+- assigned workspace
+
+## Do not touch
 - unrelated files
 - production config unless investigation requires
-Requirements:
+
+## Requirements
 - reproduce the error first
 - identify root cause before proposing fix
 - document findings in the ticket
-Acceptance criteria:
+
+## Non-goals
+- unrelated improvements
+- scope expansion without approval
+
+## Acceptance criteria
 - root cause identified
 - fix proposed or applied
 - no unrelated changes
+
+## Verification
+- outputs exist in the planned workspace
+- report written and stored under core/logs/builder_runs
+- any explicit checks requested by the ticket were performed
+
+## Required Builder report
+- Summary
+- Files changed
+- Commands or checks run
+- Verification done
+- Issues found
+- Out-of-scope observations
+- Suggested follow-up tickets
+- Confidence: High | Medium | Low
 ```
 
 ## Prompt Examples
@@ -199,3 +270,31 @@ You are the Builder. Use C:\AI Flow.
 ```
 
 → Ask: "Which ticket should I work on? Please provide a ticket ID (e.g., AF-0001)."
+
+### Example 8: investigate + error (coding, not research)
+```text
+Investigate the preposting error in Issue Inventory save.
+```
+
+→ Task type: coding (bug keywords override research keyword)
+
+### Example 9: investigate alone (research)
+```text
+Investigate the best approach for refactoring the inventory module.
+```
+
+→ Task type: research (no bug/error keywords present)
+
+### Example 10: "issue" with context (coding)
+```text
+There's an issue with PreAccounting.java when saving.
+```
+
+→ Task type: coding (issue + save + .java file)
+
+### Example 11: "issue" in docs context (docs)
+```text
+Write a known issues report for the inventory module.
+```
+
+→ Task type: docs (issue + write + report)
