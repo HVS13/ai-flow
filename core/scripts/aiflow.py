@@ -213,12 +213,26 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
             match_obj = tilde_path
         if candidate:
             # Skip if this is a fragment of a longer path with spaces
-            # e.g., "C:\AI" from "C:\AI Flow" — next char is space+letter
+            # e.g., "C:\AI" from "C:\AI Flow" — next word is a path component
+            # But NOT when next word is a sentence keyword like "especially"
             skip = False
             if match_obj:
                 end_pos = match_obj.end()
                 if end_pos < len(text) and text[end_pos] == " " and end_pos + 1 < len(text) and text[end_pos + 1].isalpha():
-                    skip = True
+                    # Extract the next word
+                    next_word_match = re.match(r"[A-Za-z]+", text[end_pos + 1:])
+                    next_word = next_word_match.group().lower() if next_word_match else ""
+                    # If next word is NOT a common sentence keyword, it's likely a path continuation
+                    sentence_keywords = {
+                        "especially", "terutama", "look", "specifically", "the", "and", "or",
+                        "but", "is", "was", "when", "where", "how", "please", "should", "must",
+                        "also", "then", "there", "with", "from", "into", "about", "like",
+                        "just", "only", "very", "even", "still", "already", "yet", "never",
+                        "always", "often", "sometimes", "usually", "use", "gunakan", "repo",
+                        "project", "workspace", "working", "code", "fix", "bug", "error",
+                    }
+                    if next_word and next_word not in sentence_keywords:
+                        skip = True
             if not skip:
                 # Skip if this is the AI Flow repo itself
                 if ai_flow_root:
@@ -272,6 +286,14 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
                 break
 
     # --- Task type detection ---
+    def has_kw(text_lower: str, keywords: list[str]) -> bool:
+        """Check if any keyword appears in text using word boundaries."""
+        for kw in keywords:
+            pattern = r"(?:^|(?<=\s))" + re.escape(kw) + r"(?=\s|[.,;:!?]|$)"
+            if re.search(pattern, text_lower):
+                return True
+        return False
+
     coding_bug_kw = [
         "bug", "error", "fix", "crash", "exception", "stacktrace",
         "not working", "broken", "broke", "problem", "fails", "failed",
@@ -284,24 +306,24 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
     spreadsheet_kw = ["excel", "csv", "spreadsheet", "reconcile", "filter data", "buat laporan"]
     research_kw = ["analyze", "compare", "research", "evaluate", "investigate", "analisis", "bandingkan"]
 
-    has_bug = any(kw in lower for kw in coding_bug_kw)
-    has_feature = any(kw in lower for kw in coding_feature_kw)
-    has_docs = any(kw in lower for kw in docs_kw)
-    has_ppt = any(kw in lower for kw in ppt_kw)
-    has_spreadsheet = any(kw in lower for kw in spreadsheet_kw)
-    has_research = any(kw in lower for kw in research_kw)
+    has_bug = has_kw(lower, coding_bug_kw)
+    has_feature = has_kw(lower, coding_feature_kw)
+    has_docs = has_kw(lower, docs_kw)
+    has_ppt = has_kw(lower, ppt_kw)
+    has_spreadsheet = has_kw(lower, spreadsheet_kw)
+    has_research = has_kw(lower, research_kw)
 
     # Contextual "issue": check for code/save/workspace context
-    has_issue = "issue" in lower
+    has_issue = has_kw(lower, ["issue"])
     code_context_kw = [
         "save", "load", "code", "class", "file", "java", "python",
         "script", "module", "function", ".java", ".py", ".js", ".ts", ".cs",
         "preposting", "inventory", "transaksi",
     ]
-    has_code_context = any(kw in lower for kw in code_context_kw)
-    has_write_context = any(kw in lower for kw in ["write", "report", "document", "summarize", "tulis", "buat"])
+    has_code_context = has_kw(lower, code_context_kw)
+    has_write_context = has_kw(lower, ["write", "report", "document", "summarize", "tulis", "buat"])
 
-    # Precedence: bug beats research, issue contextual
+    # Precedence: bug beats research, docs beats coding features, issue contextual
     if has_bug:
         result["task_type"] = "coding"
     elif has_issue and has_write_context:
@@ -310,14 +332,14 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
         result["task_type"] = "coding"
     elif has_issue:
         result["task_type"] = "coding"  # safe default
-    elif has_feature:
-        result["task_type"] = "coding"
+    elif has_docs:
+        result["task_type"] = "docs"
     elif has_ppt:
         result["task_type"] = "ppt"
     elif has_spreadsheet:
         result["task_type"] = "spreadsheet"
-    elif has_docs:
-        result["task_type"] = "docs"
+    elif has_feature:
+        result["task_type"] = "coding"
     elif has_research:
         result["task_type"] = "research"
 
