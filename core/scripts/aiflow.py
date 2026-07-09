@@ -201,22 +201,34 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
         unix_path = re.search(r"\b(/(?:home|var|opt|usr|mnt|tmp)/[^\s,;\"']+)", text)
         tilde_path = re.search(r"\b(~/[^\s,;\"']+)", text)
         candidate = ""
+        match_obj = None
         if win_path:
             candidate = win_path.group(1).rstrip(".")
+            match_obj = win_path
         elif unix_path:
             candidate = unix_path.group(1).rstrip(".")
+            match_obj = unix_path
         elif tilde_path:
             candidate = tilde_path.group(1).rstrip(".")
+            match_obj = tilde_path
         if candidate:
-            # Skip if this is the AI Flow repo itself
-            if ai_flow_root:
-                try:
-                    if Path(candidate).resolve() != ai_flow_root.resolve():
+            # Skip if this is a fragment of a longer path with spaces
+            # e.g., "C:\AI" from "C:\AI Flow" — next char is space+letter
+            skip = False
+            if match_obj:
+                end_pos = match_obj.end()
+                if end_pos < len(text) and text[end_pos] == " " and end_pos + 1 < len(text) and text[end_pos + 1].isalpha():
+                    skip = True
+            if not skip:
+                # Skip if this is the AI Flow repo itself
+                if ai_flow_root:
+                    try:
+                        if Path(candidate).resolve() != ai_flow_root.resolve():
+                            detected_path = candidate
+                    except Exception:
                         detected_path = candidate
-                except Exception:
+                else:
                     detected_path = candidate
-            else:
-                detected_path = candidate
 
     if detected_path:
         result["target_workspace"] = detected_path
@@ -270,7 +282,7 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
     docs_kw = ["summarize", "write", "document", "sop", "guide", "report", "documentation", "buat dokumen", "tulis"]
     ppt_kw = ["slides", "deck", "presentation", "pitch", "ppt", "buat presentasi"]
     spreadsheet_kw = ["excel", "csv", "spreadsheet", "reconcile", "filter data", "buat laporan"]
-    research_kw = ["analyze", "compare", "research", "evaluate", "analisis", "bandingkan"]
+    research_kw = ["analyze", "compare", "research", "evaluate", "investigate", "analisis", "bandingkan"]
 
     has_bug = any(kw in lower for kw in coding_bug_kw)
     has_feature = any(kw in lower for kw in coding_feature_kw)
@@ -1153,6 +1165,18 @@ def main(argv: list[str] | None = None) -> int:
                 raise AiFlowError("Prompt text is required.")
             raw_prompt = positional[1]
             parsed = parse_prompt(raw_prompt, ai_flow_root=root)
+
+            if parsed["role"] == "builder" and parsed["ticket_id"]:
+                raise AiFlowError(
+                    f"This looks like a Builder prompt for ticket {parsed['ticket_id']}. "
+                    f"Use 'move {parsed['ticket_id']} active' to start work, or reword as a Planner request."
+                )
+            if parsed["role"] == "builder":
+                raise AiFlowError(
+                    "This looks like a Builder prompt. "
+                    "Use 'plan-prompt' with a task description instead, or reword as a Planner request."
+                )
+
             task_type = canonical_task_type(parsed["task_type"] or "research")
             complexity = parsed["complexity"] or "medium"
             lane = "project" if command == "plan-prompt" else "fast"
