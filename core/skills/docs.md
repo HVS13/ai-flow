@@ -38,7 +38,7 @@ Builder should:
 Use:
 
 ```text
-workspaces/docs/<ticket-id>/
+workspaces/<project>/docs/tasks/<task-slug>/
 ```
 
 ## Verification
@@ -46,7 +46,7 @@ workspaces/docs/<ticket-id>/
 - audience and purpose are clear
 - required sections exist
 - headings and structure are consistent
-- examples or references are included if requested
+- references are included if requested
 - deliverables match the ticket scope
 - document is readable and not boilerplate-heavy
 

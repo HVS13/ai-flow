@@ -38,7 +38,7 @@ Builder should:
 Use:
 
 ```text
-workspaces/spreadsheets/<ticket-id>/
+workspaces/<project>/spreadsheets/tasks/<task-slug>/
 ```
 
 ## Verification

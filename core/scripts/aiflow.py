@@ -286,26 +286,37 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
         result["project"] = safe_slug(Path(result["target_workspace"]).name) or DEFAULT_PROJECT
 
     # --- Suspected area detection ---
-    camel = re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", text)
-    if camel:
-        result["suspected_area"] = camel[0]
+    # Check explicit markers first (especially, terutama, specifically, suspected)
+    trailing_noise = {"class", "file", "module", "method", "function", "service", "component"}
+    for pattern in [
+        r"especially\s+(?:the\s+)?(?:class\s+)?<?([A-Z][\w]*(?:\s+[A-Z][\w]*)*)>?",
+        r"terutama\s+(?:class\s+)?<?([A-Z][\w]*(?:\s+[A-Z][\w]*)*)>?",
+        r"specifically\s+(?:the\s+)?<?([A-Z][\w]*(?:\s+[A-Z][\w]*)*)>?",
+        r"suspected\s*:\s*([^\n]+)",
+    ]:
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip().rstrip(".")
+            # Strip trailing noise words like "class", "file", etc.
+            parts = candidate.split()
+            while len(parts) > 1 and parts[-1].lower() in trailing_noise:
+                parts.pop()
+            candidate = " ".join(parts)
+            if candidate and candidate[0].isupper():
+                result["suspected_area"] = candidate
+                break
 
+    # Fall back to file names with extensions
     if not result["suspected_area"]:
         file_match = re.search(r"\b(\w+\.(?:java|py|js|ts|xml|json|sql|cs|cpp|h|go|rb|php|swift|kt))\b", text, re.IGNORECASE)
         if file_match:
             result["suspected_area"] = file_match.group(1)
 
+    # Fall back to CamelCase class names
     if not result["suspected_area"]:
-        for pattern in [
-            r"especially\s+(?:the\s+)?([A-Z][\w]*(?:\s+[A-Z][\w]*)*)",
-            r"terutama\s+(?:class\s+)?([A-Z][\w]*(?:\s+[A-Z][\w]*)*)",
-            r"specifically\s+(?:the\s+)?([A-Z][\w]*(?:\s+[A-Z][\w]*)*)",
-            r"suspected\s*:\s*([^\n]+)",
-        ]:
-            m = re.search(pattern, text, re.IGNORECASE)
-            if m:
-                result["suspected_area"] = m.group(1).strip().rstrip(".")
-                break
+        camel = re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", text)
+        if camel:
+            result["suspected_area"] = camel[0]
 
     # --- Task type detection ---
     def has_kw(text_lower: str, keywords: list[str]) -> bool:
@@ -933,17 +944,14 @@ def route_task(task_type: str) -> str:
 
 # --- Bootstrap / Doctor ---
 
-WORKSPACE_TYPES = ["docs", "ppt", "spreadsheets", "code", "research"]
-
 
 def bootstrap(root: Path) -> None:
     dirs = [
         root / "core" / "logs" / "builder_runs",
         root / "core" / "logs" / "planner_reviews",
         root / "core" / "logs" / "incidents",
+        root / "workspaces",
     ]
-    for ws_type in WORKSPACE_TYPES:
-        dirs.append(root / "workspaces" / ws_type)
 
     created = 0
     for d in dirs:
@@ -994,9 +1002,8 @@ def doctor(root: Path, quiet: bool = False) -> list[str]:
         root / "core" / "logs" / "builder_runs",
         root / "core" / "logs" / "planner_reviews",
         root / "core" / "logs" / "incidents",
+        root / "workspaces",
     ]
-    for ws_type in WORKSPACE_TYPES:
-        required_dirs.append(root / "workspaces" / ws_type)
 
     for f in required_files:
         if not f.exists():

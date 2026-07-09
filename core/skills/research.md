@@ -36,7 +36,7 @@ Builder should:
 Use:
 
 ```text
-workspaces/research/<ticket-id>/
+workspaces/<project>/research/tasks/<task-slug>/
 ```
 
 ## Verification

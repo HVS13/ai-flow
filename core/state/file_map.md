@@ -4,11 +4,10 @@
 
 ## Important locations
 
-- docs: `workspaces/docs`
-- presentations: `workspaces/ppt`
-- spreadsheets: `workspaces/spreadsheets`
-- code: `workspaces/code`
-- research: `workspaces/research`
-- tickets: `core/tickets`
+- workspaces: `workspaces/<project>/<workspace-type>/tasks/<task>/tickets/<status>/`
 - logs: `core/logs`
 - templates: `core/templates`
+- skills: `core/skills`
+- roles: `core/roles`
+- scripts: `core/scripts`
+- state: `core/state`
