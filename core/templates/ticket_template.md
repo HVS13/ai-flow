@@ -5,17 +5,20 @@ Task type: docs
 Complexity: medium
 Owner: Builder
 Planned workspace: workspaces/docs/AF-0000-example
+Target workspace: <external path or same as planned workspace>
+Suspected area: <class, file, or module if known>
 Lane: fast
 Skill: core/skills/docs.md
 Created from: core/scripts/aiflow.py
+Created at: <timezone-aware ISO 8601>
 
 ## Goal
 
-Write a clear one-sentence goal here.
+<one-sentence goal>
 
 ## Context
 
-Add only the facts Builder needs to execute this ticket.
+<what the user reported or requested>
 
 ## Allowed areas
 
@@ -47,7 +50,7 @@ Add only the facts Builder needs to execute this ticket.
 ## Verification
 
 - outputs exist in the planned workspace
-- report written and stored under core\logs\builder_runs
+- report written and stored under core/logs/builder_runs
 - any explicit checks requested by the ticket were performed
 
 ## Required Builder report

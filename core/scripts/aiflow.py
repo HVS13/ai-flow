@@ -642,12 +642,115 @@ def add_demo_tickets(root: Path) -> None:
         print(f"- {item}")
 
 
+def bootstrap(root: Path) -> None:
+    dirs = [
+        root / "core" / "tickets" / "inbox",
+        root / "core" / "tickets" / "ready",
+        root / "core" / "tickets" / "active",
+        root / "core" / "tickets" / "review",
+        root / "core" / "tickets" / "done",
+        root / "core" / "tickets" / "rejected",
+        root / "core" / "logs" / "builder_runs",
+        root / "core" / "logs" / "planner_reviews",
+        root / "core" / "logs" / "incidents",
+        root / "workspaces" / "docs",
+        root / "workspaces" / "ppt",
+        root / "workspaces" / "spreadsheets",
+        root / "workspaces" / "code",
+        root / "workspaces" / "research",
+        root / "core" / "docs" / "examples",
+    ]
+
+    created = 0
+    for d in dirs:
+        d.mkdir(parents=True, exist_ok=True)
+        gitkeep = d / ".gitkeep"
+        if not gitkeep.exists():
+            gitkeep.write_text("", encoding="utf-8")
+            created += 1
+
+    sequence_path = root / "core" / "state" / "id_sequence.json"
+    if not sequence_path.exists():
+        save_stored_ticket_number(root, 0)
+        created += 1
+
+    print(f"Bootstrap complete. Created {created} missing items.")
+
+    issues = doctor(root, quiet=True)
+    if issues:
+        print(f"Warning: {len(issues)} issue(s) found. Run 'doctor' for details.")
+
+
+def doctor(root: Path, quiet: bool = False) -> list[str]:
+    issues: list[str] = []
+
+    required_files = [
+        root / "AGENTS.md",
+        root / "README.md",
+        root / ".gitignore",
+        root / "core" / "README.md",
+        root / "core" / "WORKFLOW.md",
+        root / "core" / "ROUTER.md",
+        root / "core" / "roles" / "PLANNER.md",
+        root / "core" / "roles" / "BUILDER.md",
+        root / "core" / "templates" / "ticket_template.md",
+        root / "core" / "templates" / "builder_report_template.md",
+        root / "core" / "templates" / "planner_review_template.md",
+        root / "core" / "skills" / "coding.md",
+        root / "core" / "skills" / "docs.md",
+        root / "core" / "skills" / "ppt.md",
+        root / "core" / "skills" / "research.md",
+        root / "core" / "skills" / "spreadsheets.md",
+        root / "core" / "state" / "file_map.md",
+        root / "core" / "state" / "id_sequence.json",
+        root / "core" / "scripts" / "aiflow.py",
+    ]
+
+    required_dirs = [
+        root / "core" / "tickets" / "inbox",
+        root / "core" / "tickets" / "ready",
+        root / "core" / "tickets" / "active",
+        root / "core" / "tickets" / "review",
+        root / "core" / "tickets" / "done",
+        root / "core" / "tickets" / "rejected",
+        root / "core" / "logs" / "builder_runs",
+        root / "core" / "logs" / "planner_reviews",
+        root / "core" / "logs" / "incidents",
+        root / "workspaces" / "docs",
+        root / "workspaces" / "ppt",
+        root / "workspaces" / "spreadsheets",
+        root / "workspaces" / "code",
+        root / "workspaces" / "research",
+        root / "core" / "docs" / "examples",
+    ]
+
+    for f in required_files:
+        if not f.exists():
+            issues.append(f"Missing file: {f.relative_to(root)}")
+
+    for d in required_dirs:
+        if not d.exists():
+            issues.append(f"Missing directory: {d.relative_to(root)}")
+
+    if not quiet:
+        if not issues:
+            print("Doctor check passed. No issues found.")
+        else:
+            print(f"Doctor found {len(issues)} issue(s):")
+            for issue in issues:
+                print(f"  - {issue}")
+
+    return issues
+
+
 def usage() -> str:
     return dedent("""\
     AI Flow CLI
 
     Commands:
       usage
+      bootstrap
+      doctor
       demo
       plan "title" --type <type> --complexity <complexity>
       new "title" --type <type> --complexity <complexity>
@@ -722,6 +825,14 @@ def main(argv: list[str] | None = None) -> int:
         if command == "demo":
             add_demo_tickets(root)
             return 0
+
+        if command == "bootstrap":
+            bootstrap(root)
+            return 0
+
+        if command == "doctor":
+            issues = doctor(root)
+            return 1 if issues else 0
 
         if command in {"plan", "new"}:
             positional = args.get("positional", [])
