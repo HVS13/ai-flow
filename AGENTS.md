@@ -4,10 +4,45 @@ This file tells AI how to use AI Flow.
 
 ## Role Detection
 
-If the user says:
-- "You are the Planner" → read `core/WORKFLOW.md`, `core/roles/PLANNER.md`, then proceed
-- "You are the Builder" → read `core/WORKFLOW.md`, `core/roles/BUILDER.md`, then proceed
-- no role specified → default to Planner
+Detect the user's role intent from any of these patterns (case-insensitive):
+
+**Planner triggers:**
+- "You are the Planner"
+- "Act as Planner"
+- "Be the Planner"
+- "As the Planner"
+- "Planner, ..."
+- "Switch to Planner"
+- "Planner mode"
+- "I need you to be the Planner"
+- "You're the Planner"
+- No role specified → default to Planner
+
+**Builder triggers:**
+- "You are the Builder"
+- "Act as Builder"
+- "Be the Builder"
+- "As the Builder"
+- "Builder, ..."
+- "Switch to Builder"
+- "Builder mode"
+- "I need you to be the Builder"
+- "You're the Builder"
+
+If the user gives a ticket ID (e.g., `AF-0001`) without specifying a role, default to Builder.
+
+## Repo Path Detection
+
+The user may specify the AI Flow repo path in any of these ways:
+
+- `Use C:\AI Flow`
+- `Use the repo at C:\AI Flow`
+- `The repo is at C:\AI Flow`
+- `Working directory: C:\AI Flow`
+- `Use this repo` → use the current working directory
+- Just `C:\AI Flow` mentioned anywhere in the prompt
+
+If no path is given and the context doesn't clarify, ask the user.
 
 ## Task Routing
 
@@ -18,6 +53,7 @@ Task type: docs | ppt | spreadsheet | coding | research | mixed
 Complexity: simple | medium | complex
 Needs ticket: yes | no
 External workspace: <path if given>
+Suspected area: <class, file, or module if mentioned>
 ```
 
 Then follow the lane rules in `core/WORKFLOW.md`.
@@ -38,11 +74,12 @@ When acting as Planner:
 
 When acting as Builder:
 
-1. Read the assigned ticket.
-2. Read the relevant skill file.
-3. Work only in the allowed scope.
-4. Write a completion report.
-5. Do not expand scope.
+1. If a ticket ID is given (e.g., `AF-0001`), read that ticket.
+2. If no ticket is given but a task is described, ask the user which ticket to work on, or ask Planner to create one first.
+3. Read the relevant skill file.
+4. Work only in the allowed scope.
+5. Write a completion report.
+6. Do not expand scope.
 
 ## External Workspaces
 
