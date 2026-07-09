@@ -1,10 +1,10 @@
-# Ticket: AF-0000-example
+# Ticket: AF-XXXX
 
 Status: ready
 Task type: docs
 Complexity: medium
 Owner: Builder
-Planned workspace: workspaces/docs/AF-0000-example
+Planned workspace: workspaces/docs/AF-XXXX
 Target workspace: <external path or same as planned workspace>
 Suspected area: <class, file, or module if known>
 Lane: fast

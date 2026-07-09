@@ -1,10 +1,10 @@
 # Builder Report
 
-Ticket: AF-0000-example
-Goal: Example ticket goal
-Date: 2026-07-09T00:00:00+00:00
+Ticket: AF-XXXX
+Goal: <ticket goal>
+Date: <timezone-aware ISO 8601>
 Task type: docs
-Workspace: workspaces/docs/AF-0000-example
+Workspace: workspaces/docs/AF-XXXX
 
 ## Summary
 

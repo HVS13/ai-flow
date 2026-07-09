@@ -95,7 +95,6 @@ python core/scripts/aiflow.py report AF-0001
 python core/scripts/aiflow.py review AF-0001
 python core/scripts/aiflow.py workspace AF-0001
 python core/scripts/aiflow.py route code
-python core/scripts/aiflow.py demo                # archive sample data
 ```
 
 ## Key Files
@@ -158,9 +157,6 @@ AI Flow root/
       next_steps.md
     docs/
       usage.md
-      examples/
-        quickstart.md
-        task_examples.md
     scripts/
       aiflow.py
   workspaces/

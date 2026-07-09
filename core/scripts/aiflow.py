@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import os
 import re
-import shutil
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -505,7 +504,6 @@ def save_stored_ticket_number(root: Path, number: int) -> None:
 def next_ticket_number(root: Path) -> int:
     tickets_dir = root / "core" / "tickets"
     logs_dir = root / "core" / "logs"
-    examples_dir = root / "core" / "docs" / "examples"
 
     search_paths: list[Path] = []
 
@@ -515,10 +513,6 @@ def next_ticket_number(root: Path) -> int:
     for log_dir in [logs_dir / "builder_runs", logs_dir / "planner_reviews"]:
         if log_dir.exists():
             search_paths.extend(log_dir.glob("AF-*.md"))
-
-    if examples_dir.exists():
-        search_paths.extend(examples_dir.glob("AF-*.md"))
-        search_paths.extend(examples_dir.glob("demo_AF-*.md"))
 
     highest_seen = max(max_af_number_from_paths(search_paths), load_stored_ticket_number(root))
     return highest_seen + 1
@@ -904,77 +898,6 @@ def route_task(task_type: str) -> str:
     return f"Task type: {task_type}\nSkill: {skill}\nWorkspace: {workspace}\nFast lane: small single-pass tasks\nProject lane: ticketed tasks with review"
 
 
-def move_if_exists(source: Path, destination: Path) -> Path | None:
-    if not source.exists():
-        return None
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    final_destination = unique_path(destination)
-    shutil.move(str(source), str(final_destination))
-    return final_destination
-
-
-def delete_if_exists(path: Path) -> bool:
-    if path.is_dir():
-        shutil.rmtree(path)
-        return True
-    if path.exists():
-        path.unlink()
-        return True
-    return False
-
-
-def add_demo_tickets(root: Path) -> None:
-    tickets_dir = root / "core" / "tickets"
-    logs_dir = root / "core" / "logs"
-    workspaces_dir = root / "workspaces"
-    examples_dir = root / "core" / "docs" / "examples"
-    examples_dir.mkdir(parents=True, exist_ok=True)
-
-    workspace_ticket_ids = set()
-    for status in VALID_STATUSES:
-        for path in tickets_dir.glob(f"{status}/AF-*.md"):
-            workspace_ticket_ids.add(path.stem)
-
-    moved: list[str] = []
-
-    for status in VALID_STATUSES:
-        for path in sorted(tickets_dir.glob(f"{status}/*.md")):
-            target = examples_dir / f"demo_{path.name}"
-            final = move_if_exists(path, target)
-            if final is not None:
-                moved.append(str(final))
-
-    for log_type in ["builder_runs", "planner_reviews"]:
-        log_dir = logs_dir / log_type
-        if log_dir.exists():
-            for path in sorted(log_dir.glob("*.md")):
-                target = examples_dir / f"demo_{path.name}"
-                final = move_if_exists(path, target)
-                if final is not None:
-                    moved.append(str(final))
-
-    for workspace_type_dir in workspaces_dir.iterdir():
-        if not workspace_type_dir.is_dir():
-            continue
-        for workspace_dir in workspace_type_dir.iterdir():
-            if not workspace_dir.is_dir():
-                continue
-            if workspace_dir.name not in workspace_ticket_ids:
-                delete_if_exists(workspace_dir)
-
-    cache_dir = root / "core" / "scripts" / "__pycache__"
-    if cache_dir.exists():
-        delete_if_exists(cache_dir)
-
-    if not moved:
-        print("No demo items moved.")
-        return
-
-    print("Moved demo items:")
-    for item in moved:
-        print(f"- {item}")
-
-
 def bootstrap(root: Path) -> None:
     dirs = [
         root / "core" / "tickets" / "inbox",
@@ -991,7 +914,6 @@ def bootstrap(root: Path) -> None:
         root / "workspaces" / "spreadsheets",
         root / "workspaces" / "code",
         root / "workspaces" / "research",
-        root / "core" / "docs" / "examples",
     ]
 
     created = 0
@@ -1054,7 +976,6 @@ def doctor(root: Path, quiet: bool = False) -> list[str]:
         root / "workspaces" / "spreadsheets",
         root / "workspaces" / "code",
         root / "workspaces" / "research",
-        root / "core" / "docs" / "examples",
     ]
 
     for f in required_files:
@@ -1084,7 +1005,6 @@ def usage() -> str:
       usage
       bootstrap
       doctor
-      demo
       plan "title" --type <type> --complexity <complexity>
       new "title" --type <type> --complexity <complexity>
       plan-prompt "full user prompt"
@@ -1108,7 +1028,7 @@ def usage() -> str:
       - ticket filenames: AF-0001_YYYY-MM-DD_slug.md
       - created at: timezone-aware ISO 8601 timestamp
       - report/review filenames include ISO date/time stamp
-      - ticket IDs are globally unique across tickets, logs, and examples
+      - ticket IDs are globally unique across tickets and logs
     """)
 
 
@@ -1156,10 +1076,6 @@ def main(argv: list[str] | None = None) -> int:
 
         if command == "usage":
             print(usage())
-            return 0
-
-        if command == "demo":
-            add_demo_tickets(root)
             return 0
 
         if command == "bootstrap":

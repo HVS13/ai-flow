@@ -22,12 +22,6 @@ python core\scripts\aiflow.py plan "Create pitch deck from business summary" --t
 python core\scripts\aiflow.py new "Summarize this document" --type docs --complexity simple
 ```
 
-### Move sample/demo data into examples
-
-```bash
-python core\scripts\aiflow.py demo
-```
-
 Notes:
 - `code` and `coding` are now interchangeable.
 - `report` and `review` create timestamped log files.
