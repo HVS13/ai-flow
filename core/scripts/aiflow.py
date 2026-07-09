@@ -230,6 +230,7 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
                         "just", "only", "very", "even", "still", "already", "yet", "never",
                         "always", "often", "sometimes", "usually", "use", "gunakan", "repo",
                         "project", "workspace", "working", "code", "fix", "bug", "error",
+                        "for", "in", "on", "near", "around", "at", "to", "of", "by",
                     }
                     if next_word and next_word not in sentence_keywords:
                         skip = True
