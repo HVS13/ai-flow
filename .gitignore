@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+
+# Editor / OS junk
+Thumbs.db
+.DS_Store
+
+# Local overrides
+.env
