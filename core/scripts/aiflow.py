@@ -287,24 +287,37 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
 
     # --- Suspected area detection ---
     # Check explicit markers first (especially, terutama, specifically, suspected)
-    trailing_noise = {"class", "file", "module", "method", "function", "service", "component"}
-    for pattern in [
+    # Patterns run case-sensitively so [A-Z] means actual uppercase.
+    noise_words = {"class", "file", "module", "method", "function",
+                   "should", "must", "will", "can", "is", "was", "are", "were", "has", "have",
+                   "the", "a", "an", "in", "on", "at", "to", "of", "by", "for", "from", "with",
+                   "and", "or", "but", "not", "be", "been", "being", "do", "does", "did",
+                   "handle", "handles", "check", "checks", "first", "also", "then", "there"}
+    area_patterns = [
         r"especially\s+(?:the\s+)?(?:class\s+)?<?([A-Z][\w]*(?:\s+[A-Z][\w]*)*)>?",
         r"terutama\s+(?:class\s+)?<?([A-Z][\w]*(?:\s+[A-Z][\w]*)*)>?",
         r"specifically\s+(?:the\s+)?<?([A-Z][\w]*(?:\s+[A-Z][\w]*)*)>?",
-        r"suspected\s*:\s*([^\n]+)",
-    ]:
-        m = re.search(pattern, text, re.IGNORECASE)
+    ]
+    for pattern in area_patterns:
+        m = re.search(pattern, text)
         if m:
             candidate = m.group(1).strip().rstrip(".")
-            # Strip trailing noise words like "class", "file", etc.
             parts = candidate.split()
-            while len(parts) > 1 and parts[-1].lower() in trailing_noise:
-                parts.pop()
-            candidate = " ".join(parts)
-            if candidate and candidate[0].isupper():
+            # Truncate at first noise word
+            trimmed = []
+            for p in parts:
+                if p.lower() in noise_words:
+                    break
+                trimmed.append(p)
+            candidate = " ".join(trimmed)
+            if candidate:
                 result["suspected_area"] = candidate
                 break
+
+    if not result["suspected_area"]:
+        m = re.search(r"suspected\s*:\s*([^\n]+)", text, re.IGNORECASE)
+        if m:
+            result["suspected_area"] = m.group(1).strip().rstrip(".")
 
     # Fall back to file names with extensions
     if not result["suspected_area"]:
