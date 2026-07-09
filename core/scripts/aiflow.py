@@ -28,6 +28,8 @@ TASK_TO_WORKSPACE = {
     "mixed": "research",
 }
 
+DEFAULT_PROJECT = "general"
+
 
 class AiFlowError(Exception):
     pass
@@ -65,7 +67,6 @@ def resolve_root(argv: list[str]) -> Path:
 ROOT = Path(os.environ.get("AI_FLOW_ROOT", str(Path(__file__).resolve().parent.parent.parent)))
 CORE = ROOT / "core"
 WORKSPACES = ROOT / "workspaces"
-TICKETS = CORE / "tickets"
 TEMPLATES = CORE / "templates"
 STATE = CORE / "state"
 LOGS = CORE / "logs"
@@ -90,11 +91,37 @@ def workspace_for_task(task_type: str) -> str:
     return TASK_TO_WORKSPACE.get(task_type, "research")
 
 
+def safe_slug(text: str, max_length: int = 60) -> str:
+    text = text.lower().strip()
+    allowed = []
+    prev_dash = False
+    for ch in text:
+        if ch.isalnum() or ch in ["-", "."]:
+            allowed.append(ch)
+            prev_dash = False
+        elif ch in [" ", "_", "/", "\\"]:
+            if not prev_dash and allowed:
+                allowed.append("-")
+                prev_dash = True
+    slug = "".join(allowed).strip("-")
+    return slug[:max_length] if slug else "task"
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def now_stamp() -> str:
+    return datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d_%H%M%S")
+
+
+# --- Prompt Parser ---
+
 def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str]:
     """Parse a raw user prompt into structured routing fields.
 
     Returns dict with keys: role, task_type, complexity, target_workspace,
-    suspected_area, ticket_id, title.
+    suspected_area, ticket_id, title, project.
     Empty string means not detected.
     """
     text = prompt.strip()
@@ -107,6 +134,7 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
         "suspected_area": "",
         "ticket_id": "",
         "title": "",
+        "project": "",
     }
 
     # --- Ticket ID ---
@@ -153,7 +181,6 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
     detected_path = ""
 
     # Strategy 1: Find path markers and extract path after them
-    # Handles paths with spaces: "Use C:\AI Flow", "Workspace: C:\Project\NMU"
     marker_re = re.compile(
         r"(?:use|gunakan|workspace\s*:\s*|project\s+(?:is\s+)?at\s+|"
         r"the\s+code\s+is\s+in\s+|working\s+on\s+|repo\s+(?:at|di)\s+)",
@@ -161,14 +188,11 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
     )
     for m in marker_re.finditer(text):
         after = text[m.end():]
-        # Try Windows path: drive letter + colon + backslash + path chars
         wp = re.match(r"([A-Z]:\\(?:[\w][\w \\-]*[\w]|[\w]))", after, re.IGNORECASE)
         if wp:
             candidate = wp.group(1).strip()
-            # Verify it's not followed by more path chars (cross-sentence bleed)
             rest = after[wp.end():]
             if not rest or rest[0] in ".,;:!?\n" or rest.startswith(" ") or rest.lower().startswith(("especially", "terutama", "look", "specifically")):
-                # Skip if this is the AI Flow repo itself
                 if ai_flow_root:
                     try:
                         if Path(candidate).resolve() == ai_flow_root.resolve():
@@ -177,7 +201,6 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
                         pass
                 detected_path = candidate
                 break
-        # Try Unix path
         up = re.match(r"(/[\w][\w/ _-]*[\w/])", after)
         if up:
             candidate = up.group(1).strip()
@@ -185,7 +208,6 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
             if not rest or rest[0] in ".,;:!?\n" or rest.startswith(" "):
                 detected_path = candidate
                 break
-        # Try tilde path
         tp = re.match(r"(~/[\w][\w/ _-]*[\w/])", after)
         if tp:
             candidate = tp.group(1).strip()
@@ -211,17 +233,12 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
             candidate = tilde_path.group(1).rstrip(".")
             match_obj = tilde_path
         if candidate:
-            # Skip if this is a fragment of a longer path with spaces
-            # e.g., "C:\AI" from "C:\AI Flow" — next word is a path component
-            # But NOT when next word is a sentence keyword like "especially"
             skip = False
             if match_obj:
                 end_pos = match_obj.end()
                 if end_pos < len(text) and text[end_pos] == " " and end_pos + 1 < len(text) and text[end_pos + 1].isalpha():
-                    # Extract the next word
                     next_word_match = re.match(r"[A-Za-z]+", text[end_pos + 1:])
                     next_word = next_word_match.group().lower() if next_word_match else ""
-                    # If next word is NOT a common sentence keyword, it's likely a path continuation
                     sentence_keywords = {
                         "especially", "terutama", "look", "specifically", "the", "and", "or",
                         "but", "is", "was", "when", "where", "how", "please", "should", "must",
@@ -234,7 +251,6 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
                     if next_word and next_word not in sentence_keywords:
                         skip = True
             if not skip:
-                # Skip if this is the AI Flow repo itself
                 if ai_flow_root:
                     try:
                         if Path(candidate).resolve() != ai_flow_root.resolve():
@@ -247,7 +263,7 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
     if detected_path:
         result["target_workspace"] = detected_path
 
-    # Fallback: non-path workspace references (e.g., "Workspace: inventory module")
+    # Fallback: non-path workspace references
     if not result["target_workspace"]:
         for pattern in [
             r"workspace\s*:\s*([^\n.]+?)(?:\s*[.,;]|\s*$|\s+\bespecially\b|\s+\bterutama\b)",
@@ -260,19 +276,25 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
                     result["target_workspace"] = candidate
                     break
 
+    # --- Project detection ---
+    # --project option or "project: <name>" in text
+    project_match = re.search(r"(?:--project\s+|project\s*:\s*)([A-Za-z][\w-]*)", text, re.IGNORECASE)
+    if project_match:
+        result["project"] = project_match.group(1).strip().lower()
+    elif result["target_workspace"]:
+        # Derive project from workspace path: last directory component
+        result["project"] = safe_slug(Path(result["target_workspace"]).name) or DEFAULT_PROJECT
+
     # --- Suspected area detection ---
-    # CamelCase class names
     camel = re.findall(r"\b([A-Z][a-z]+(?:[A-Z][a-z]+)+)\b", text)
     if camel:
         result["suspected_area"] = camel[0]
 
-    # File names with extensions (e.g., PreAccounting.java)
     if not result["suspected_area"]:
         file_match = re.search(r"\b(\w+\.(?:java|py|js|ts|xml|json|sql|cs|cpp|h|go|rb|php|swift|kt))\b", text, re.IGNORECASE)
         if file_match:
             result["suspected_area"] = file_match.group(1)
 
-    # "especially the X" / "terutama X" / "specifically X"
     if not result["suspected_area"]:
         for pattern in [
             r"especially\s+(?:the\s+)?([A-Z][\w]*(?:\s+[A-Z][\w]*)*)",
@@ -287,7 +309,6 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
 
     # --- Task type detection ---
     def has_kw(text_lower: str, keywords: list[str]) -> bool:
-        """Check if any keyword appears in text using word boundaries."""
         for kw in keywords:
             pattern = r"(?:^|(?<=\s))" + re.escape(kw) + r"(?=\s|[.,;:!?]|$)"
             if re.search(pattern, text_lower):
@@ -313,17 +334,14 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
     has_spreadsheet = has_kw(lower, spreadsheet_kw)
     has_research = has_kw(lower, research_kw)
 
-    # Contextual "issue": check for code/save/workspace context
     has_issue = has_kw(lower, ["issue"])
     code_context_kw = [
         "save", "load", "code", "class", "file", "java", "python",
         "script", "module", "function", ".java", ".py", ".js", ".ts", ".cs",
-        "preposting", "inventory", "transaksi",
     ]
     has_code_context = has_kw(lower, code_context_kw)
     has_write_context = has_kw(lower, ["write", "report", "document", "summarize", "tulis", "buat"])
 
-    # Precedence: bug beats research, docs beats coding features, issue contextual
     if has_bug:
         result["task_type"] = "coding"
     elif has_issue and has_write_context:
@@ -331,7 +349,7 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
     elif has_issue and has_code_context:
         result["task_type"] = "coding"
     elif has_issue:
-        result["task_type"] = "coding"  # safe default
+        result["task_type"] = "coding"
     elif has_docs:
         result["task_type"] = "docs"
     elif has_ppt:
@@ -354,50 +372,24 @@ def parse_prompt(prompt: str, ai_flow_root: Path | None = None) -> dict[str, str
     else:
         result["complexity"] = "medium"
 
-    # --- Title extraction (first sentence or first 80 chars) ---
+    # --- Title extraction ---
     first_line = text.split("\n")[0].strip()
-    # Remove role prefix if present
     for prefix in ["you are the planner", "you are the builder", "act as planner",
                     "act as builder", "be the planner", "be the builder",
                     "as the planner", "as the builder", "planner,", "builder,"]:
         if first_line.lower().startswith(prefix):
             first_line = first_line[len(prefix):].lstrip(" ,.!:").strip()
             break
-    # Remove "use <path>" prefix
     first_line = re.sub(r"^[Uu]se\s+[^.]*\.?\s*", "", first_line).strip()
     first_line = re.sub(r"^[Gg]unakan\s+[^.]*\.?\s*", "", first_line).strip()
-    # Stop at workspace/project markers
     first_line = re.split(r"\s+(?:Workspace|Project|Repo)\s*:", first_line, maxsplit=1, flags=re.IGNORECASE)[0]
-    # Stop at "especially" / "terutama"
     first_line = re.split(r"\s+(?:especially|terutama)\s+", first_line, maxsplit=1, flags=re.IGNORECASE)[0]
     result["title"] = first_line[:120].strip().rstrip(".,;") if first_line else text[:120]
 
     return result
 
 
-def safe_slug(text: str, max_length: int = 60) -> str:
-    text = text.lower().strip()
-    allowed = []
-    prev_dash = False
-    for ch in text:
-        if ch.isalnum() or ch in ["-", "."]:
-            allowed.append(ch)
-            prev_dash = False
-        elif ch in [" ", "_", "/", "\\"]:
-            if not prev_dash and allowed:
-                allowed.append("-")
-                prev_dash = True
-    slug = "".join(allowed).strip("-")
-    return slug[:max_length] if slug else "task"
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
-
-
-def now_stamp() -> str:
-    return datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d_%H%M%S")
-
+# --- Ticket Text Parsing ---
 
 def parse_ticket_text(text: str) -> dict[str, str]:
     data: dict[str, str] = {"goal": "", "task_type": "", "complexity": "", "status": ""}
@@ -440,33 +432,7 @@ def ticket_title_from_path(path: Path) -> str:
     return stem
 
 
-def find_ticket_path(root: Path, ticket_id: str) -> Path | None:
-    tickets_dir = root / "core" / "tickets"
-    normalized = ticket_id.strip()
-
-    for status in VALID_STATUSES:
-        candidate = tickets_dir / status / f"{normalized}.md"
-        if candidate.exists():
-            return candidate
-
-    candidates: list[Path] = []
-    for status in VALID_STATUSES:
-        candidates.extend(tickets_dir.glob(f"{status}/{normalized}*.md"))
-
-    candidates = [
-        candidate
-        for candidate in candidates
-        if candidate.stem == normalized or candidate.stem.startswith(f"{normalized}_")
-    ]
-
-    if len(candidates) == 1:
-        return candidates[0]
-
-    if len(candidates) > 1:
-        raise AiFlowError(f"Ambiguous ticket id '{ticket_id}': {', '.join(sorted(p.stem for p in candidates))}")
-
-    return None
-
+# --- Ticket ID Sequence ---
 
 def max_af_number_from_paths(paths: list[Path]) -> int:
     max_num = 0
@@ -502,13 +468,11 @@ def save_stored_ticket_number(root: Path, number: int) -> None:
 
 
 def next_ticket_number(root: Path) -> int:
-    tickets_dir = root / "core" / "tickets"
+    workspaces_dir = root / "workspaces"
     logs_dir = root / "core" / "logs"
 
     search_paths: list[Path] = []
-
-    for status in VALID_STATUSES:
-        search_paths.extend(tickets_dir.glob(f"{status}/AF-*.md"))
+    search_paths.extend(workspaces_dir.glob("**/tickets/*/AF-*.md"))
 
     for log_dir in [logs_dir / "builder_runs", logs_dir / "planner_reviews"]:
         if log_dir.exists():
@@ -549,6 +513,60 @@ def unique_path(path: Path) -> Path:
         counter += 1
 
 
+# --- Ticket Path Resolution ---
+
+def find_ticket_path(root: Path, ticket_id: str) -> Path | None:
+    """Search recursively under workspaces/**/tickets/ for a ticket."""
+    workspaces_dir = root / "workspaces"
+    normalized = ticket_id.strip()
+
+    # Exact match
+    for candidate in workspaces_dir.glob(f"**/tickets/*/{normalized}.md"):
+        return candidate
+
+    # Prefix match
+    candidates: list[Path] = []
+    for candidate in workspaces_dir.glob(f"**/tickets/*/{normalized}*.md"):
+        if candidate.stem == normalized or candidate.stem.startswith(f"{normalized}_"):
+            candidates.append(candidate)
+
+    if len(candidates) == 1:
+        return candidates[0]
+
+    if len(candidates) > 1:
+        raise AiFlowError(f"Ambiguous ticket id '{ticket_id}': {', '.join(sorted(p.stem for p in candidates))}")
+
+    return None
+
+
+def ticket_path_components(path: Path) -> dict[str, str]:
+    """Extract project, workspace_type, task_slug, status from a ticket path.
+
+    Expected path: workspaces/<project>/<workspace-type>/tasks/<task-slug>/tickets/<status>/<file>.md
+    """
+    parts = path.parts
+    result = {"project": "", "workspace_type": "", "task_slug": "", "status": ""}
+    try:
+        # Find "workspaces" in the path
+        ws_idx = parts.index("workspaces")
+        if ws_idx + 1 < len(parts):
+            result["project"] = parts[ws_idx + 1]
+        if ws_idx + 2 < len(parts):
+            result["workspace_type"] = parts[ws_idx + 2]
+        if ws_idx + 3 < len(parts) and parts[ws_idx + 3] == "tasks":
+            if ws_idx + 4 < len(parts):
+                result["task_slug"] = parts[ws_idx + 4]
+        if "tickets" in parts:
+            ticket_idx = parts.index("tickets")
+            if ticket_idx + 1 < len(parts):
+                result["status"] = parts[ticket_idx + 1]
+    except (ValueError, IndexError):
+        pass
+    return result
+
+
+# --- Ticket Operations ---
+
 def write_ticket(
     root: Path,
     title: str,
@@ -557,22 +575,25 @@ def write_ticket(
     lane: str,
     target_workspace: str = "",
     suspected_area: str = "",
+    project: str = "",
 ) -> Path:
-    tickets_dir = root / "core" / "tickets"
-    workspaces_dir = root / "workspaces"
-
     task_type = canonical_task_type(task_type)
     if complexity not in VALID_COMPLEXITY:
         raise AiFlowError(f"Invalid complexity: {complexity}")
 
+    project = project or DEFAULT_PROJECT
+    workspace_name = workspace_for_task(task_type)
+    task_slug = safe_slug(title)
+
     num = next_ticket_number(root)
     ticket_id = build_ticket_id(num)
-    slug = safe_slug(title)
     iso_date = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d")
-    filename = f"{ticket_id}_{iso_date}_{slug}.md"
-    workspace_name = workspace_for_task(task_type)
-    planned_workspace = f"workspaces/{workspace_name}/{ticket_id}"
-    planned_workspace_path = workspaces_dir / workspace_name / ticket_id
+    filename = f"{ticket_id}_{iso_date}_{task_slug}.md"
+
+    ticket_dir = root / "workspaces" / project / workspace_name / "tasks" / task_slug / "tickets" / "ready"
+    ticket_dir.mkdir(parents=True, exist_ok=True)
+
+    planned_workspace = f"workspaces/{project}/{workspace_name}/tasks/{task_slug}"
     skill_path = f"core/skills/{skill_for_task(task_type)}"
 
     lines = [
@@ -582,6 +603,7 @@ def write_ticket(
         f"Task type: {task_type}",
         f"Complexity: {complexity}",
         "Owner: Builder",
+        f"Project: {project}",
         f"Planned workspace: {planned_workspace}",
         f"Target workspace: {target_workspace or planned_workspace}",
     ]
@@ -681,9 +703,13 @@ def write_ticket(
         "- Confidence: High | Medium | Low",
     ]
 
-    out_path = tickets_dir / "ready" / filename
+    out_path = ticket_dir / filename
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    planned_workspace_path.mkdir(parents=True, exist_ok=True)
+
+    # Create planned workspace scratch area
+    scratch_dir = root / planned_workspace
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+
     save_stored_ticket_number(root, num)
     return out_path
 
@@ -700,25 +726,31 @@ def set_front_status(path: Path, status: str) -> None:
 
 
 def list_tickets(root: Path, status_filter: str | None = None) -> str:
-    tickets_dir = root / "core" / "tickets"
+    workspaces_dir = root / "workspaces"
     normalized_status = (status_filter or "").strip().lower() or None
     if normalized_status and normalized_status not in VALID_STATUSES:
         raise AiFlowError(f"Invalid status: {status_filter}")
 
     rows = []
-    for status in VALID_STATUSES:
+    for ticket_path in sorted(workspaces_dir.glob("**/tickets/*/*.md")):
+        status = ticket_path.parent.name
         if normalized_status and status != normalized_status:
             continue
-        for path in sorted(tickets_dir.glob(f"{status}/*.md")):
-            title = ticket_title_from_path(path)
-            rows.append(f"{path.stem}\t{status}\t{title}")
+        if status not in VALID_STATUSES:
+            continue
+        title = ticket_title_from_path(ticket_path)
+        components = ticket_path_components(ticket_path)
+        project = components["project"]
+        ws_type = components["workspace_type"]
+        task = components["task_slug"]
+        rows.append(f"{ticket_path.stem}\t{status}\t{project}/{ws_type}/{task}\t{title}")
+
     if not rows:
         return "No tickets found."
-    return "\n".join(["ticket_id\tstatus\ttitle"] + rows)
+    return "\n".join(["ticket_id\tstatus\tpath\ttitle"] + rows)
 
 
 def move_ticket(root: Path, ticket_id: str, new_status: str) -> str:
-    tickets_dir = root / "core" / "tickets"
     if new_status not in VALID_STATUSES:
         raise AiFlowError(f"Invalid status: {new_status}")
     path = find_ticket_path(root, ticket_id)
@@ -727,7 +759,7 @@ def move_ticket(root: Path, ticket_id: str, new_status: str) -> str:
     current_status = path.parent.name
     if current_status == new_status:
         return f"{path.stem} already in {new_status}."
-    dest_dir = tickets_dir / new_status
+    dest_dir = path.parent.parent / new_status
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / path.name
     if dest_path.exists():
@@ -879,9 +911,10 @@ def create_workspace_for_ticket(root: Path, ticket_id: str, expected_task_type: 
     if workspace_value:
         workspace_root = Path(workspace_value)
         if not workspace_root.is_absolute():
-            workspace_root = root / workspace_root
+            workspace_root = root / workspace_value
     else:
-        workspace_root = root / "workspaces" / workspace_for_task(task_type) / path.stem
+        components = ticket_path_components(path)
+        workspace_root = root / "workspaces" / components["project"] / workspace_for_task(task_type) / "tasks" / components["task_slug"]
 
     workspace_root.mkdir(parents=True, exist_ok=True)
     notes = workspace_root / "notes.md"
@@ -894,27 +927,23 @@ def create_workspace_for_ticket(root: Path, ticket_id: str, expected_task_type: 
 def route_task(task_type: str) -> str:
     task_type = canonical_task_type(task_type)
     skill = f"core/skills/{skill_for_task(task_type)}"
-    workspace = f"workspaces/{workspace_for_task(task_type)}"
+    workspace = f"workspaces/<project>/{workspace_for_task(task_type)}/tasks/<task-slug>"
     return f"Task type: {task_type}\nSkill: {skill}\nWorkspace: {workspace}\nFast lane: small single-pass tasks\nProject lane: ticketed tasks with review"
+
+
+# --- Bootstrap / Doctor ---
+
+WORKSPACE_TYPES = ["docs", "ppt", "spreadsheets", "code", "research"]
 
 
 def bootstrap(root: Path) -> None:
     dirs = [
-        root / "core" / "tickets" / "inbox",
-        root / "core" / "tickets" / "ready",
-        root / "core" / "tickets" / "active",
-        root / "core" / "tickets" / "review",
-        root / "core" / "tickets" / "done",
-        root / "core" / "tickets" / "rejected",
         root / "core" / "logs" / "builder_runs",
         root / "core" / "logs" / "planner_reviews",
         root / "core" / "logs" / "incidents",
-        root / "workspaces" / "docs",
-        root / "workspaces" / "ppt",
-        root / "workspaces" / "spreadsheets",
-        root / "workspaces" / "code",
-        root / "workspaces" / "research",
     ]
+    for ws_type in WORKSPACE_TYPES:
+        dirs.append(root / "workspaces" / ws_type)
 
     created = 0
     for d in dirs:
@@ -962,21 +991,12 @@ def doctor(root: Path, quiet: bool = False) -> list[str]:
     ]
 
     required_dirs = [
-        root / "core" / "tickets" / "inbox",
-        root / "core" / "tickets" / "ready",
-        root / "core" / "tickets" / "active",
-        root / "core" / "tickets" / "review",
-        root / "core" / "tickets" / "done",
-        root / "core" / "tickets" / "rejected",
         root / "core" / "logs" / "builder_runs",
         root / "core" / "logs" / "planner_reviews",
         root / "core" / "logs" / "incidents",
-        root / "workspaces" / "docs",
-        root / "workspaces" / "ppt",
-        root / "workspaces" / "spreadsheets",
-        root / "workspaces" / "code",
-        root / "workspaces" / "research",
     ]
+    for ws_type in WORKSPACE_TYPES:
+        required_dirs.append(root / "workspaces" / ws_type)
 
     for f in required_files:
         if not f.exists():
@@ -1005,10 +1025,10 @@ def usage() -> str:
       usage
       bootstrap
       doctor
-      plan "title" --type <type> --complexity <complexity>
-      new "title" --type <type> --complexity <complexity>
-      plan-prompt "full user prompt"
-      new-prompt "full user prompt"
+      plan "title" --type <type> --complexity <complexity> [--project <project>]
+      new "title" --type <type> --complexity <complexity> [--project <project>]
+      plan-prompt "full user prompt" [--project <project>]
+      new-prompt "full user prompt" [--project <project>]
       list [--status <status>]
       move <ticket-id> <status>
       report <ticket-id>
@@ -1018,17 +1038,14 @@ def usage() -> str:
       parse "full user prompt"
 
     Options:
-      --root <path>     override detected AI Flow root
+      --root <path>       override detected AI Flow root
+      --project <name>    project slug for ticket placement (default: general)
 
     Env:
-      AI_FLOW_ROOT      override detected AI Flow root
+      AI_FLOW_ROOT        override detected AI Flow root
 
-    Ticket conventions:
-      - ticket id: AF-0001, AF-0002, ...
-      - ticket filenames: AF-0001_YYYY-MM-DD_slug.md
-      - created at: timezone-aware ISO 8601 timestamp
-      - report/review filenames include ISO date/time stamp
-      - ticket IDs are globally unique across tickets and logs
+    Ticket storage:
+      workspaces/<project>/<workspace-type>/tasks/<task-slug>/tickets/<status>/
     """)
 
 
@@ -1060,11 +1077,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args = parse_args(argv)
         root = resolve_root(argv)
-        global ROOT, CORE, WORKSPACES, TICKETS, TEMPLATES, STATE, LOGS, DOCS
+        global ROOT, CORE, WORKSPACES, TEMPLATES, STATE, LOGS, DOCS
         ROOT = root
         CORE = ROOT / "core"
         WORKSPACES = ROOT / "workspaces"
-        TICKETS = CORE / "tickets"
         TEMPLATES = CORE / "templates"
         STATE = CORE / "state"
         LOGS = CORE / "logs"
@@ -1093,8 +1109,9 @@ def main(argv: list[str] | None = None) -> int:
             title = positional[1]
             task_type = canonical_task_type(options.get("type"))
             complexity = options.get("complexity", "medium")
+            project = options.get("project", DEFAULT_PROJECT)
             lane = "project" if command == "plan" else "fast"
-            path = write_ticket(root, title, task_type, complexity, lane)
+            path = write_ticket(root, title, task_type, complexity, lane, project=project)
             print(f"Created ticket: {path}")
             return 0
 
@@ -1118,6 +1135,7 @@ def main(argv: list[str] | None = None) -> int:
 
             task_type = canonical_task_type(parsed["task_type"] or "research")
             complexity = parsed["complexity"] or "medium"
+            project = options.get("project") or parsed["project"] or DEFAULT_PROJECT
             lane = "project" if command == "plan-prompt" else "fast"
             title = parsed["title"] or raw_prompt[:80]
             path = write_ticket(
@@ -1128,9 +1146,11 @@ def main(argv: list[str] | None = None) -> int:
                 lane=lane,
                 target_workspace=parsed["target_workspace"],
                 suspected_area=parsed["suspected_area"],
+                project=project,
             )
             print(f"Created ticket: {path}")
             print(f"  Role hint: {parsed['role'] or 'planner (default)'}")
+            print(f"  Project: {project}")
             print(f"  Task type: {task_type}")
             print(f"  Complexity: {complexity}")
             print(f"  Lane: {lane}")

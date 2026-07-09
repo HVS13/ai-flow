@@ -3,8 +3,8 @@
 Ticket: AF-XXXX
 Goal: <ticket goal>
 Date: <timezone-aware ISO 8601>
-Task type: docs
-Workspace: workspaces/docs/AF-XXXX
+Task type: <task-type>
+Workspace: workspaces/<project>/<workspace-type>/tasks/<task-slug>
 
 ## Summary
 

@@ -13,20 +13,27 @@ python core\scripts\aiflow.py usage
 ### Create a project-lane ticket
 
 ```bash
-python core\scripts\aiflow.py plan "Create pitch deck from business summary" --type ppt --complexity medium
+python core\scripts\aiflow.py plan "<task title>" --type <type> --complexity <complexity> --project <project>
 ```
 
 ### Create a fast-lane ticket
 
 ```bash
-python core\scripts\aiflow.py new "Summarize this document" --type docs --complexity simple
+python core\scripts\aiflow.py new "<task title>" --type <type> --complexity <complexity> --project <project>
+```
+
+### Create a ticket from a raw prompt
+
+```bash
+python core\scripts\aiflow.py plan-prompt "<full user prompt>" --project <project>
+python core\scripts\aiflow.py new-prompt "<full user prompt>"
 ```
 
 Notes:
-- `code` and `coding` are now interchangeable.
+- `code` and `coding` are interchangeable.
 - `report` and `review` create timestamped log files.
 - ticket and log timestamps are timezone-aware ISO 8601.
-- `list --status bogus` now returns a validation error.
+- `list --status bogus` returns a validation error.
 
 ### List tickets
 
@@ -66,4 +73,25 @@ python core\scripts\aiflow.py workspace AF-0001 --task-type ppt
 
 ```bash
 python core\scripts\aiflow.py route docs
+```
+
+### Parse a prompt (dry run)
+
+```bash
+python core\scripts\aiflow.py parse "<full user prompt>"
+```
+
+## Options
+
+| Option | Description |
+|---|---|
+| `--root <path>` | Override detected AI Flow root |
+| `--project <name>` | Project slug for ticket placement (default: general) |
+
+## Ticket Storage
+
+Tickets live under:
+
+```text
+workspaces/<project>/<workspace-type>/tasks/<task-slug>/tickets/<status>/<AF-XXXX>.md
 ```

@@ -47,7 +47,7 @@ Planner does not normally implement the work.
 
 ## External Workspace Handling
 
-When the user mentions an external project path (e.g., `C:\Project\NMU`):
+When the user mentions an external project path (e.g., `C:\Project\<ProjectName>`):
 
 - Record it as `Target workspace` in the ticket.
 - Do not modify AI Flow's own files to fix project bugs.

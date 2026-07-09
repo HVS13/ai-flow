@@ -8,14 +8,14 @@ This file classifies user requests into AI Flow workflow actions.
 
 When multiple rules compete, apply in this order:
 
-1. **Role shortcut**: Ticket ID present + no role → Builder (overrides default Planner)
-2. **Bug beats research**: If both error/bug/fix/fail/problem keywords AND investigate/analyze keywords are present → coding, not research
-3. **Contextual issue**: "issue" alone → check context:
-   - paired with error/bug/fix/fail/crash/broken/problem/save/load/code/class/file/workspace → coding
-   - paired with write/document/report/summarize → docs
-   - no context clue → coding (safe default for this workflow)
+1. **Role shortcut**: Ticket ID present + no role -> Builder (overrides default Planner)
+2. **Bug beats research**: If both error/bug/fix/fail/problem keywords AND investigate/analyze keywords are present -> coding, not research
+3. **Contextual issue**: "issue" alone -> check context:
+   - paired with error/bug/fix/fail/crash/broken/problem/save/load/code/class/file -> coding
+   - paired with write/document/report/summarize -> docs
+   - no context clue -> coding (safe default for this workflow)
 4. **Explicit beats implicit**: User-specified task type, complexity, or workspace overrides inference
-5. **Default role**: No role + no ticket ID → Planner
+5. **Default role**: No role + no ticket ID -> Planner
 
 ### Role Detection
 
@@ -31,7 +31,7 @@ Case-insensitive. Match any of these patterns:
 - "planner mode"
 - "i need you to be the planner"
 - "you're the planner"
-- no role specified + no ticket ID → Planner (default)
+- no role specified + no ticket ID -> Planner (default)
 
 **Builder triggers:**
 - "you are the builder"
@@ -45,24 +45,24 @@ Case-insensitive. Match any of these patterns:
 - "you're the builder"
 
 **Shortcut (highest role priority):**
-- If a ticket ID (e.g., `AF-0001`) is present but no role is specified → Builder
+- If a ticket ID (e.g., `AF-0001`) is present but no role is specified -> Builder
 
 ### Task Type Detection
 
 Case-insensitive. Match keywords anywhere in the prompt.
 
-**Coding (bug/error — takes priority over research):**
+**Coding (bug/error -- takes priority over research):**
 bug, error, fix, crash, exception, stacktrace, not working, broken, broke, problem, fails, failed, gagal, tidak bisa, tidak jalan, bermasalah, tampil error, muncul error, keluar error, ada error
 
 **Coding (contextual issue):**
-- "issue" + any of: error, bug, fix, fail, crash, broken, problem, save, load, code, class, file, workspace, java, python, script, module, function
-- "issue" alone → coding (safe default)
+- "issue" + any of: error, bug, fix, fail, crash, broken, problem, save, load, code, class, file, java, python, script, module, function
+- "issue" alone -> coding (safe default)
 
 **Coding (feature):**
 implement, add feature, create function, build, refactor, develop
 
 **Docs:**
-summarize, write, document, SOP, guide, report, documentation, buat dokumen, tulis, known issues report, issue list
+summarize, write, document, SOP, guide, report, documentation, buat dokumen, tulis
 
 **PPT:**
 slides, deck, presentation, pitch, ppt, buat presentasi
@@ -71,16 +71,16 @@ slides, deck, presentation, pitch, ppt, buat presentasi
 Excel, CSV, data, spreadsheet, reconcile, filter data, buat laporan
 
 **Research (only when no bug/error keywords present):**
-analyze, compare, research, evaluate, analisis, bandingkan
+analyze, compare, research, evaluate, investigate, analisis, bandingkan
 
-Note: "investigate" alone → research. "investigate" + any bug/error keyword → coding.
+Note: "investigate" alone -> research. "investigate" + any bug/error keyword -> coding.
 
 **Mixed:**
 multiple types combined
 
 **Fallback:**
-- If no keywords match but the user describes a concrete task → infer from context
-- If truly ambiguous → ask the user
+- If no keywords match but the user describes a concrete task -> infer from context
+- If truly ambiguous -> ask the user
 
 ### Complexity Detection
 
@@ -90,7 +90,7 @@ multiple types combined
 | Multiple files, investigation needed, medium scope, default | medium |
 | Large scope, multi-step, cross-system, uncertain root cause, "complex", "rumit" | complex |
 
-If not specified → default to `medium`.
+If not specified -> default to `medium`.
 
 ### External Workspace Detection
 
@@ -99,75 +99,69 @@ If the user mentions a path pattern anywhere in the prompt:
 - `/home/...` or `/var/...` or `/opt/...` (Linux)
 - `~/...` (home directory shorthand)
 
-And the path is NOT the AI Flow repo itself → treat as target project workspace.
+And the path is NOT the AI Flow repo itself -> treat as target project workspace.
 
 Also detect these phrasings:
 - "Workspace: <path>"
-- "Workspace: <path>, especially the <ClassName>"
 - "project is at <path>"
 - "the code is in <path>"
 - "working on <path>"
 - "especially the <ClassName> class in <path>"
-- "<path>, especially the <ClassName>"
 - "gunakan <path>" (Indonesian: "use")
 - "repo di <path>" (Indonesian: "repo at")
-
-Record in ticket as:
-```text
-Target workspace: <path>
-```
 
 ### Suspected Area Detection
 
 If the user mentions:
-- A class name (CamelCase, e.g., `PreAccounting`, `InventoryService`)
-- A file name with extension (e.g., `PreAccounting.java`, `config.xml`)
-- A module or feature name (e.g., "Issue Inventory save", "login flow")
+- A class name (CamelCase)
+- A file name with extension
+- A module or feature name
 - "especially the X" or "specifically X" or "terutama X"
 
-Record in ticket as:
-```text
-Suspected area: <name>
-```
+### Project Detection
+
+If the user mentions:
+- `--project <name>` option
+- "project: <name>" in text
+- A target workspace path -> derive project from last path component
+
+Default project: `general`
 
 ## Planner Actions
 
 After classification:
 
-1. If task is `coding` + bug/error/problem/issue → create investigation ticket
-2. If task is `coding` + feature request → create implementation ticket
-3. If task is `docs` → create documentation ticket
-4. If task is `ppt` → create presentation ticket
-5. If task is `spreadsheet` → create data ticket
-6. If task is `research` → create analysis ticket
-7. If task is `mixed` → split into multiple tickets or ask user
-8. If task is unclear → ask the user before creating a ticket
+1. If task is `coding` + bug/error/problem/issue -> create investigation ticket
+2. If task is `coding` + feature request -> create implementation ticket
+3. If task is `docs` -> create documentation ticket
+4. If task is `ppt` -> create presentation ticket
+5. If task is `spreadsheet` -> create data ticket
+6. If task is `research` -> create analysis ticket
+7. If task is `mixed` -> split into multiple tickets or ask user
+8. If task is unclear -> ask the user before creating a ticket
 
 ## Ticket Output Format
-
-For bug investigation tickets:
 
 ```text
 # Ticket: AF-XXXX
 
 Status: ready
-Task type: coding
-Complexity: medium
+Task type: <task-type>
+Complexity: <complexity>
 Owner: Builder
-Planned workspace: workspaces/code/AF-XXXX
+Project: <project-slug>
+Planned workspace: workspaces/<project>/<workspace-type>/tasks/<task-slug>
 Target workspace: <external path or same as planned workspace>
 Suspected area: <class or file>
-Lane: project
-Skill: core/skills/coding.md
+Lane: <fast|project>
+Skill: core/skills/<skill-file>
 Created from: core/scripts/aiflow.py
 Created at: <timezone-aware ISO 8601>
 
 ## Goal
-
 <one-sentence goal>
 
 ## Context
-
 <what the user reported or requested>
 
 ## Allowed areas
@@ -214,35 +208,35 @@ Created at: <timezone-aware ISO 8601>
 ### Example 1: Original format
 ```text
 You are the Planner. Use C:\AI Flow.
-Pada saat save transaksi Issue Inventory bagian Line, tampil error kalau preposting already exist.
-Workspace: C:\Project\NMU, especially the PreAccounting Java class.
+<task description in any language>
+Workspace: <external-path>, especially the <ClassName> class.
 ```
 
 ### Example 2: Casual format
 ```text
 Hey, act as Planner. Use the repo at C:\AI Flow.
-There's a bug when saving Issue Inventory lines — it says preposting already exist.
-Project is at C:\Project\NMU. Look at PreAccounting.java.
+There's a bug when saving <feature> lines.
+Project is at <external-path>. Look at <FileName>.<ext>.
 ```
 
 ### Example 3: Minimal format
 ```text
-Planner, fix this error: preposting already exist on Issue Inventory save.
-C:\Project\NMU, PreAccounting class.
+Planner, fix this error: <error message> on <feature> save.
+<external-path>, <ClassName> class.
 ```
 
 ### Example 4: Indonesian mixed
 ```text
 You are the Planner. Gunakan C:\AI Flow.
-Waktu save transaksi Issue Inventory bagian Line, muncul error preposting already exist.
-Workspace: C:\Project\NMU, terutama class PreAccounting.
+<task description in Indonesian>
+Workspace: <external-path>, terutama class <ClassName>.
 ```
 
 ### Example 5: No role specified
 ```text
-I'm getting a preposting error when saving Issue Inventory lines.
-Project: C:\Project\NMU
-Suspected: PreAccounting.java
+<task description with error>
+Project: <external-path>
+Suspected: <FileName>.<ext>
 ```
 
 All of the above should produce:
@@ -251,8 +245,8 @@ Role: Planner
 Task type: coding
 Complexity: medium
 Lane: project
-Target workspace: C:\Project\NMU
-Suspected area: PreAccounting Java class
+Target workspace: <external-path>
+Suspected area: <ClassName>
 Action: create investigation ticket
 ```
 
@@ -262,39 +256,11 @@ You are the Builder. Use C:\AI Flow.
 Work on AF-0001.
 ```
 
-→ Builder reads `core/tickets/ready/AF-0001_*.md` and executes.
+-> Builder reads the ticket and executes.
 
 ### Example 7: Builder without ticket
 ```text
 You are the Builder. Use C:\AI Flow.
 ```
 
-→ Ask: "Which ticket should I work on? Please provide a ticket ID (e.g., AF-0001)."
-
-### Example 8: investigate + error (coding, not research)
-```text
-Investigate the preposting error in Issue Inventory save.
-```
-
-→ Task type: coding (bug keywords override research keyword)
-
-### Example 9: investigate alone (research)
-```text
-Investigate the best approach for refactoring the inventory module.
-```
-
-→ Task type: research (no bug/error keywords present)
-
-### Example 10: "issue" with context (coding)
-```text
-There's an issue with PreAccounting.java when saving.
-```
-
-→ Task type: coding (issue + save + .java file)
-
-### Example 11: "issue" in docs context (docs)
-```text
-Write a known issues report for the inventory module.
-```
-
-→ Task type: docs (issue + write + report)
+-> Ask: "Which ticket should I work on? Please provide a ticket ID (e.g., AF-0001)."

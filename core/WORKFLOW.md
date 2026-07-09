@@ -9,13 +9,6 @@ AI Flow root/
   core/
     roles/
     skills/
-    tickets/
-      inbox/
-      ready/
-      active/
-      review/
-      done/
-      rejected/
     templates/
     state/
     logs/
@@ -25,11 +18,17 @@ AI Flow root/
     scripts/
     docs/
   workspaces/
-    docs/
-    ppt/
-    spreadsheets/
-    code/
-    research/
+    <project-slug>/
+      <workspace-type>/
+        tasks/
+          <task-slug>/
+            tickets/
+              inbox/
+              ready/
+              active/
+              review/
+              done/
+              rejected/
 ```
 
 ## Core loop
@@ -57,7 +56,7 @@ inbox -> ready -> active -> review -> done
 ## Work rules
 
 - `core` is the single source of truth.
-- `workspaces` are the only execution areas.
+- `workspaces` are the execution areas, organized by project and task type.
 - Tickets define allowed scope.
 - Workspace creation should match the ticket, not the other way around.
 - Logs are evidence, not decoration.
@@ -96,11 +95,10 @@ User -> Planner -> ticket -> Builder -> report -> Planner review -> human approv
 
 ## Routing rule
 
-- docs -> `workspaces\docs`
-- ppt -> `workspaces\ppt`
-- spreadsheet -> `workspaces\spreadsheets`
-- coding -> `workspaces\code`
-- code -> accepted alias for `coding`
-- research -> `workspaces\research`
-- unknown -> `workspaces\research`
+- docs -> `workspaces/<project>/docs/tasks/<task>/tickets/`
+- ppt -> `workspaces/<project>/ppt/tasks/<task>/tickets/`
+- spreadsheet -> `workspaces/<project>/spreadsheets/tasks/<task>/tickets/`
+- coding -> `workspaces/<project>/code/tasks/<task>/tickets/`
+- research -> `workspaces/<project>/research/tasks/<task>/tickets/`
+- unknown -> `workspaces/<project>/research/tasks/<task>/tickets/`
 - mixed -> split the work or create one ticket per work type

@@ -1,14 +1,15 @@
 # Ticket: AF-XXXX
 
 Status: ready
-Task type: docs
-Complexity: medium
+Task type: <task-type>
+Complexity: <complexity>
 Owner: Builder
-Planned workspace: workspaces/docs/AF-XXXX
-Target workspace: <external path or same as planned workspace>
+Project: <project-slug>
+Planned workspace: workspaces/<project>/<workspace-type>/tasks/<task-slug>
+Target workspace: <external-path or same as planned workspace>
 Suspected area: <class, file, or module if known>
-Lane: fast
-Skill: core/skills/docs.md
+Lane: <fast|project>
+Skill: core/skills/<skill-file>
 Created from: core/scripts/aiflow.py
 Created at: <timezone-aware ISO 8601>
 
